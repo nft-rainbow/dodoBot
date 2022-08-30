@@ -93,7 +93,6 @@ func main() {
 					_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
 						ChannelId: data.ChannelId,
 						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, resp.Advertise)},
-						DodoId: data.DodoId,
 					})
 					return nil
 
@@ -160,7 +159,6 @@ func main() {
 					_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
 						ChannelId: data.ChannelId,
 						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, resp.Advertise)},
-						DodoId: data.DodoId,
 					})
 					return nil
 				}
