@@ -57,7 +57,7 @@ func InsertDB(address string, val, bucketName []byte) error {
 	return nil
 }
 
-func GetCount(address string, bucketName []byte) ([]byte, error) {
+func GetStatus(address string, bucketName []byte) ([]byte, error) {
 	key := []byte(address)
 	var val []byte
 

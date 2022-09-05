@@ -16,7 +16,6 @@ import (
 func SendEasyMintRequest(token string, dto models.EasyMintMetaDto) (*models.MintResp, error){
 	b, err := json.Marshal(dto)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 	fmt.Println("Start to easy mint")
@@ -25,7 +24,6 @@ func SendEasyMintRequest(token string, dto models.EasyMintMetaDto) (*models.Mint
 	req.Header.Add("Authorization", "Bearer " + token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err)
 		return  nil, err
 	}
 
@@ -35,15 +33,9 @@ func SendEasyMintRequest(token string, dto models.EasyMintMetaDto) (*models.Mint
 	if err != nil {
 		return nil, err
 	}
-	t := make(map[string]interface{})
-	err = json.Unmarshal(content, &t)
-	if err != nil {
-		return nil, err
+	if tmp.ErrMessage != "" {
+		return nil, errors.New(tmp.ErrMessage)
 	}
-	if t["code"] != nil {
-		return nil, errors.New(t["message"].(string))
-	}
-	fmt.Println(t)
 	id, err := getTokenId(tmp.ID, token)
 	if err != nil {
 		return nil, err
@@ -51,8 +43,10 @@ func SendEasyMintRequest(token string, dto models.EasyMintMetaDto) (*models.Mint
 
 	res := &models.MintResp{
 		UserAddress: dto.MintToAddress,
-		Advertise: viper.GetString("advertise"),
-		NFTAddress: viper.GetString("easyMint.mintRespPrefix") + strconv.Itoa(int(id)),
+		Contract: viper.GetString("easyMint.contract"),
+		NFTAddress: viper.GetString("easyMint.mintRespPrefix") + viper.GetString("easyMint.contract") + "/" + id,
+		TokenID: id,
+		Time: tmp.BaseModel.CreatedAt.String(),
 	}
 
 	defer resp.Body.Close()
@@ -62,7 +56,6 @@ func SendEasyMintRequest(token string, dto models.EasyMintMetaDto) (*models.Mint
 func SendCustomMintRequest(token string, dto models.CustomMintDto) (*models.MintResp, error){
 	b, err := json.Marshal(dto)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 
@@ -72,7 +65,6 @@ func SendCustomMintRequest(token string, dto models.CustomMintDto) (*models.Mint
 	req.Header.Add("Authorization", "Bearer " + token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err)
 		return  nil, err
 	}
 
@@ -82,13 +74,8 @@ func SendCustomMintRequest(token string, dto models.CustomMintDto) (*models.Mint
 	if err != nil {
 		return nil, err
 	}
-	t := make(map[string]interface{})
-	err = json.Unmarshal(content, &t)
-	if err != nil {
-		return nil, err
-	}
-	if t["code"] != nil {
-		return nil, errors.New(t["message"].(string))
+	if tmp.ErrMessage != "" {
+		return nil, errors.New(tmp.ErrMessage)
 	}
 
 	id, err := getTokenId(tmp.ID, token)
@@ -98,8 +85,10 @@ func SendCustomMintRequest(token string, dto models.CustomMintDto) (*models.Mint
 
 	res := &models.MintResp{
 		UserAddress: dto.MintToAddress,
-		Advertise: viper.GetString("advertise"),
-		NFTAddress: viper.GetString("customMint.mintRespPrefix") +  dto.ContractAddress + "/" + strconv.Itoa(int(id)),
+		NFTAddress: viper.GetString("customMint.mintRespPrefix") +  dto.ContractAddress + "/" + id,
+		Contract: dto.ContractAddress,
+		TokenID: id,
+		Time: tmp.BaseModel.CreatedAt.String(),
 	}
 
 	defer resp.Body.Close()
@@ -136,23 +125,17 @@ func CreateMetadata(token, fileUrl, name, description string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	t := make(map[string]interface{})
-	err = json.Unmarshal(content, &t)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println(t)
-	if t["code"] != nil {
-		return "", errors.New(t["message"].(string))
+	if tmp.Message != "" {
+		return "", errors.New(tmp.Message)
 	}
 
 	return tmp.MetadataURI, nil
 }
 
-func getTokenId(id uint, token string) (uint64, error) {
+func getTokenId(id uint, token string) (string, error) {
 	t := models.MintTask{}
 	fmt.Println("Start to get token id")
-	for t.TokenId == 0 && t.Status != 1{
+	for t.TokenId == "" && t.Status != 1{
 		req, err := http.NewRequest("GET", viper.GetString("host") + "v1/mints/" + strconv.Itoa(int(id)),nil)
 		if err != nil {
 			panic(err)
@@ -161,16 +144,19 @@ func getTokenId(id uint, token string) (uint64, error) {
 		req.Header.Add("Authorization", "Bearer " + token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 		content, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 
 		err = json.Unmarshal(content, &t)
 		if err != nil {
-			return 0, err
+			return "", err
+		}
+		if t.Error != "" {
+			return "", errors.New(t.Error)
 		}
 		time.Sleep(10 * time.Second)
 	}

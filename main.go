@@ -59,40 +59,14 @@ func main() {
 						return nil
 					}
 					userAddress := tmp[2]
-					_, err := utils.CheckCfxAddress(utils.CONFLUX_TEST, userAddress)
-					if err != nil {
-						_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
-							ChannelId: data.ChannelId,
-							MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> %s", data.DodoId, err.Error())},
-						})
-						return nil
-					}
-					err = checkRestrain(userAddress, database.EasyMintBucket)
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), "", nil)
-						return nil
-					}
-
-					token, err := service.Login()
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.EasyMintBucket)
-						return nil
-					}
-
-					resp, err := service.SendEasyMintRequest(token, models.EasyMintMetaDto{
-						Chain:         viper.GetString("chainType"),
-						Name:          viper.GetString("easyMint.name"),
-						Description:   viper.GetString("easyMint.description"),
-						MintToAddress: userAddress,
-						FileUrl:       viper.GetString("easyMint.fileUrl"),
-					})
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.EasyMintBucket)
+					resp, err := handleEasyMint(userAddress)
+					if err != nil{
+						processErrorMessage(&instance, data, err.Error())
 						return nil
 					}
 					_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
 						ChannelId: data.ChannelId,
-						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, resp.Advertise)},
+						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, viper.GetString("advertise"))},
 					})
 					return nil
 
@@ -108,57 +82,15 @@ func main() {
 						return nil
 					}
 					userAddress := contents[2]
-					_, err = utils.CheckCfxAddress(utils.CONFLUX_TEST, userAddress)
-					if err != nil {
-						_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
-							ChannelId: data.ChannelId,
-							MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> %s", data.DodoId, err.Error())},
-						})
+					resp, err := handleCustomMint(userAddress)
+					if err != nil{
+						processErrorMessage(&instance, data, err.Error())
 						return nil
 					}
 
-					contractAddress := viper.GetString("customMint.contractAddress")
-					_, err = utils.CheckCfxAddress(utils.CONFLUX_TEST, contractAddress)
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), "", database.CustomMintBucket)
-						return nil
-					}
-					err = checkRestrain(userAddress, database.CustomMintBucket)
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.CustomMintBucket)
-						return nil
-					}
-
-					token, err := service.Login()
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.CustomMintBucket)
-						return nil
-					}
-
-					metadataUri, err := service.CreateMetadata(token, viper.GetString("customMint.fileUrl"), viper.GetString("customMint.name"), viper.GetString("customMint.description"))
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.CustomMintBucket)
-						return nil
-					}
-
-					resp , err := service.SendCustomMintRequest(token, models.CustomMintDto{
-						models.ContractInfoDto{
-							Chain: viper.GetString("chainType"),
-							ContractType: viper.GetString("customMint.contractType"),
-							ContractAddress: contractAddress,
-						},
-						models.MintItemDto{
-							MintToAddress: userAddress,
-							MetadataUri: metadataUri,
-						},
-					})
-					if err != nil {
-						processErrorMessage(&instance, data, err.Error(), userAddress, database.CustomMintBucket)
-						return nil
-					}
 					_, _ = instance.SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
 						ChannelId: data.ChannelId,
-						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, resp.Advertise)},
+						MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> Congratulate on minting NFT for %s successfully. Check this link to view it: %s \n  %s", data.DodoId, resp.UserAddress, resp.NFTAddress, viper.GetString("advertise"))},
 					})
 					return nil
 				}
@@ -188,35 +120,116 @@ func main() {
 }
 
 func checkRestrain(address string, mintType []byte) error{
-	count, err := database.GetCount(address, mintType)
+	status, err := database.GetStatus(address, mintType)
 	if err != nil {
 		return err
 	}
-	if count == nil {
-		err = database.InsertDB(address, []byte("1"), mintType)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
 
-	if !bytes.Equal(count, []byte("0")) {
-		return errors.New("This address has minted the NFT")
+	if bytes.Equal(status, []byte("Success")) {
+		return errors.New("This account has minted NFT")
+	}
+	if bytes.Equal(status, []byte("Minting")) {
+		return errors.New("This account is minting NFT")
 	}
 
 	return nil
 }
 
-func processErrorMessage(instance *client.Client, data *websocket.ChannelMessageEventBody, message, address string, mintType []byte) {
+func processErrorMessage(instance *client.Client, data *websocket.ChannelMessageEventBody, message string) {
 	_, _ = (*instance).SendChannelMessage(context.Background(), &model.SendChannelMessageReq{
 		ChannelId: data.ChannelId,
 		MessageBody: &model.TextMessage{Content: fmt.Sprintf("<@!%s> %s", data.DodoId, message)},
 	})
+}
 
-	if address != "" {
-		_ = database.InsertDB(address, []byte("0"), mintType)
+func handleEasyMint(userAddress string)(*models.MintResp, error) {
+	var err error
+	defer func() {
+		status, _ := database.GetStatus(userAddress, database.EasyMintBucket)
+		if err != nil && !bytes.Equal(status, []byte("Success")) {
+			_ = database.InsertDB(userAddress, []byte("NoMinting"), database.EasyMintBucket)
+		}
+	}()
+	_, err = utils.CheckCfxAddress(utils.CONFLUX_TEST, userAddress)
+	if err != nil {
+		return nil, err
 	}
-	return
+	err = checkRestrain(userAddress, database.EasyMintBucket)
+	if err != nil {
+		return nil, err
+	}
+	_ = database.InsertDB(userAddress, []byte("Minting"), database.EasyMintBucket)
+
+	token, err := service.Login()
+	if err != nil {
+		return nil, err
+	}
+
+	resp , err := service.SendEasyMintRequest(token, models.EasyMintMetaDto{
+		Chain: viper.GetString("chainType"),
+		Name: viper.GetString("easyMint.name"),
+		Description: viper.GetString("easyMint.description"),
+		MintToAddress: userAddress,
+		FileUrl: viper.GetString("easyMint.fileUrl"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	_ = database.InsertDB(userAddress, []byte("Success"), database.EasyMintBucket)
+	return resp, nil
+}
+
+func handleCustomMint(userAddress string) (*models.MintResp, error){
+	var err error
+	defer func() {
+		status, _ := database.GetStatus(userAddress, database.CustomMintBucket)
+		if err != nil && !bytes.Equal(status, []byte("Success")) {
+			_ = database.InsertDB(userAddress, []byte("NoMinting"), database.CustomMintBucket)
+		}
+	}()
+	_, err = utils.CheckCfxAddress(utils.CONFLUX_TEST, userAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	contractAddress := viper.GetString("customMint.contractAddress")
+	_, err = utils.CheckCfxAddress(utils.CONFLUX_TEST, contractAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	err = checkRestrain(userAddress, database.CustomMintBucket)
+	if err != nil {
+		return nil, err
+	}
+	_ = database.InsertDB(userAddress, []byte("Minting"), database.CustomMintBucket)
+
+	token, err := service.Login()
+	if err != nil {
+		return nil, err
+	}
+
+	metadataUri, err := service.CreateMetadata(token, viper.GetString("customMint.fileUrl"), viper.GetString("customMint.name"), viper.GetString("customMint.description"))
+	if err != nil {
+		return nil, err
+	}
+	resp , err := service.SendCustomMintRequest(token, models.CustomMintDto{
+		models.ContractInfoDto{
+			Chain: viper.GetString("chainType"),
+			ContractType: viper.GetString("customMint.contractType"),
+			ContractAddress: contractAddress,
+		},
+		models.MintItemDto{
+			MintToAddress: userAddress,
+			MetadataUri: metadataUri,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	_ = database.InsertDB(userAddress, []byte("Success"), database.CustomMintBucket)
+
+	return resp, err
 }
 
 
